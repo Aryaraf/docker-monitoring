@@ -6,8 +6,8 @@ import requests
 from datetime import datetime
 
 # === Configuration ===
-BOT_TOKEN = "8360135264:AAEaAHSHG83gl07T2yoD24o_nREwVKWNv0E"
-CHAT_ID = "6252040922"
+BOT_TOKEN = ""
+CHAT_ID = ""
 LOG_DIR = os.path.expanduser("~/docker_monitor_logs")
 INTERVAL = 300
 THRESHOLD = 80
