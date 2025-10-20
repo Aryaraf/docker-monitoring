@@ -1,14 +1,14 @@
 #!/bin/bash
-# docker_monitor_pro_v2.sh
+# docker_monitor_pro_v3.sh
 # Docker Monitoring + Telegram Alerts + Daily Report (CPU, MEM, NET I/O, BLOCK I/O)
 
 BOT_TOKEN=""
 CHAT_ID=""
 
 LOG_DIR="$HOME/docker_monitor_logs"
-INTERVAL=300         
-THRESHOLD=80      
-REPORT_HOUR=16
+INTERVAL=300          
+THRESHOLD=80          
+REPORT_HOUR=16        
 REPORT_MIN=59
 LAST_DAILY=""
 
@@ -23,7 +23,9 @@ send_telegram() {
 }
 
 calc_average() {
-  awk '/CPU=/{cpu[$1]+=$2; count[$1]++} /NET_IN=/{net_in[$1]+=$3} /NET_OUT=/{net_out[$1]+=$4} /BLOCK_IN=/{block_in[$1]+=$5} /BLOCK_OUT=/{block_out[$1]+=$6}
+  awk '/CPU=/{cpu[$1]+=$2; count[$1]++}
+       /NET_IN=/{net_in[$1]+=$3} /NET_OUT=/{net_out[$1]+=$4}
+       /BLOCK_IN=/{block_in[$1]+=$5} /BLOCK_OUT=/{block_out[$1]+=$6}
   END {
     for (c in cpu)
       printf "%s %.2f %.2f %.2f %.2f %.2f\n", c, cpu[c]/count[c], net_in[c], net_out[c], block_in[c], block_out[c]
@@ -38,20 +40,22 @@ while true; do
   echo "[$TIMESTAMP]" >> "$LOG_FILE"
 
   docker ps --format '{{.Names}}' | while read -r container; do
-    STATS=$(docker stats --no-stream --format "{{.CPUPerc}} {{.MemUsage}} {{.NetIO}} {{.BlockIO}}" "$container" 2>/dev/null)
+    STATS=$(docker stats --no-stream --format "{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}" "$container" 2>/dev/null)
 
-    CPU=$(echo "$STATS" | awk '{print $1}' | tr -d '%')
-    MEM=$(echo "$STATS" | awk '{print $2" "$3}')
-    NET_IN=$(echo "$STATS" | awk '{print $4}')
-    NET_OUT=$(echo "$STATS" | awk '{print $5}')
-    BLOCK_IN=$(echo "$STATS" | awk '{print $6}')
-    BLOCK_OUT=$(echo "$STATS" | awk '{print $7}')
+    CPU=$(echo "$STATS" | cut -d'|' -f1 | tr -d '%')
+    MEM=$(echo "$STATS" | cut -d'|' -f2)
+    NET_IO=$(echo "$STATS" | cut -d'|' -f3)
+    BLOCK_IO=$(echo "$STATS" | cut -d'|' -f4)
+
+    NET_IN=$(echo "$NET_IO" | awk -F'/' '{print $1}' | xargs)
+    NET_OUT=$(echo "$NET_IO" | awk -F'/' '{print $2}' | xargs)
+    BLOCK_IN=$(echo "$BLOCK_IO" | awk -F'/' '{print $1}' | xargs)
+    BLOCK_OUT=$(echo "$BLOCK_IO" | awk -F'/' '{print $2}' | xargs)
 
     echo "$container CPU=$CPU MEM=$MEM NET_IN=$NET_IN NET_OUT=$NET_OUT BLOCK_IN=$BLOCK_IN BLOCK_OUT=$BLOCK_OUT" >> "$LOG_FILE"
 
-    # === ALERTS ===
     if (( $(echo "$CPU > $THRESHOLD" | bc -l) )); then
-      MESSAGE="⚠️ *HIGH CPU ALERT*%0A🕒 $TIMESTAMP%0A🧩 Container: *$container*%0A🔥 CPU: *${CPU}%*%0A💾 Memory: ${MEM}%0A🌐 Net I/O: ${NET_IN} / ${NET_OUT}%0A📀 Block I/O: ${BLOCK_IN} / ${BLOCK_OUT}"
+      MESSAGE="*HIGH CPU ALERT*%0A $TIMESTAMP%0A Container: *$container*%0A CPU: *${CPU}%*%0A Memory: ${MEM}%0A Net I/O: ${NET_IN} / ${NET_OUT}%0A Block I/O: ${BLOCK_IN} / ${BLOCK_OUT}"
       send_telegram "$MESSAGE"
     fi
   done
@@ -61,11 +65,10 @@ while true; do
   HOUR=$(date +%H)
   MIN=$(date +%M)
 
-  # === DAILY REPORT ===
   if [[ "$HOUR" -eq "$REPORT_HOUR" && "$MIN" -ge "$REPORT_MIN" && "$LAST_DAILY" != "$DATE" ]]; then
     REPORT=$(calc_average "$LOG_FILE" | awk -v d="$(date '+%Y-%m-%d')" \
-      'BEGIN {printf "*📊 Daily Docker Report (%s)*\n\n", d}
-       {printf "🧩 %s\n🔥 Avg CPU: %.2f%%\n🌐 Net I/O: IN %.2f | OUT %.2f\n📀 Block I/O: IN %.2f | OUT %.2f\n\n", $1, $2, $3, $4, $5, $6}')
+      'BEGIN {printf "*Daily Docker Report (%s)*\n\n", d}
+       {printf "%s\n Avg CPU: %.2f%%\n Net I/O: IN %.2f | OUT %.2f\n Block I/O: IN %.2f | OUT %.2f\n\n", $1, $2, $3, $4, $5, $6}')
 
     if [ -n "$REPORT" ]; then
       send_telegram "$REPORT"
